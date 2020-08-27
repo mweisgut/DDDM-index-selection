@@ -1,0 +1,33 @@
+# execute via  ../ampl/ampl index-selection.run
+reset;
+
+#option solver '../ampl/gurobi'; # macOS
+option solver gurobi; # windows & linux
+option randseed '42';
+model models/index-selection.mod;
+data models/random2.dat
+
+for {ck in chunks} {
+	let chunk_configurations := configurations_ck[ck];
+	solve;
+}
+
+#let chunk_configurations := configuration_candidates;
+let chunk_configurations := {c in configurations: ceil(sum{q in queries}(use_q_c[q, c]) / query_count) = 1};
+
+solve;
+
+set use_c default {}; # stores the ids of used configurations
+
+for {c in configurations} {
+	if sum{q in queries}(use_q_c[q, c]) > 0 then
+	  let use_c := use_c union {c};
+}
+
+display index_count;
+display use_c;
+display costs;
+display _total_solve_time;
+option print_separator ";";
+#print "Index Count;Costs; total_solve_time" > 'evaluation_master.csv'; # overwrite existing csv
+print index_count, costs, _total_solve_time >> 'evaluation_master.csv'; # append existing csv

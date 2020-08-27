@@ -1,0 +1,89 @@
+data;
+param index_count := 2000; # 10 50 100 200 500 1000
+param query_count := 100;
+param memory_limit := 100;
+param workload_count := 1;
+## objective weights
+param total_cost_weight := 1;
+param max_workload_cost_weight := 0;
+param workload_cost_mean_variance_weight := 0;
+
+## multi-index configuration
+let configuration_count := index_count;
+
+## chunking
+let chunk_size := index_count;
+
+model;
+# cost for using index i for query q
+param costs_q_i {q in queries, i in 0..index_count} :=
+	if i = 0 then round(Uniform(10, 100))
+	else round(costs_q_i[q, 0] - costs_q_i[q, 0] * Uniform(0, 0.9));
+
+param base_workload_q {q in queries} integer, >= 0 := round(Uniform(0, 1000));
+for {w in workloads} {
+	let probability_w[w] := 1; # TODO do we still need the probability? we might want to remove the probability
+	for {q in queries} {
+		let count_w_q[w, q] := round(base_workload_q[q] * Uniform(0.8, 1.2)); # 20% less or more than base
+	}
+}
+
+for {i in indexes} {
+	let memory_consumption_i[i] := round(Uniform(1, 20));
+}
+
+for {i in indexes} {
+	let prev_use_i[i] := 0;
+}
+
+for {i in indexes} {
+	let creation_costs_i[i] := round(Uniform(1, 100));
+}
+
+for {i in indexes} {
+	let removal_costs_i[i] := round(Uniform(1, 20));
+}
+
+## multi-index configuration
+
+# generate index configurations and costs
+param combination_used_i_j {i in indexes, jIndex in indexes} binary default 0;
+param random_i; # random index id
+param random_j; # random index id
+
+param first_improvement;
+param last_improvement;
+param generated_improvement;
+
+# set costs_q_c for queries without using indexes
+for {q in queries} {
+    let costs_q_c[q, 0] := costs_q_i[q, 0];
+}
+
+# set contains_c_i and costs_q_c
+for {c in 1..configuration_count} {
+	if (c <= index_count) then {
+		let contains_c_i[c, c] := 1;
+		for {q in queries} {
+	        let costs_q_c[q, c] := costs_q_i[q, c];
+		}
+	} else {
+		let random_i := round(Uniform(1, index_count));
+		let random_j := round(Uniform(1, index_count));
+		repeat while (random_i = random_j or combination_used_i_j[random_i, random_j] = 1) {
+			let random_i := round(Uniform(1, index_count));
+			let random_j := round(Uniform(1, index_count));
+		}
+		let combination_used_i_j[random_i, random_j] := 1;
+		let combination_used_i_j[random_j, random_i] := 1;
+		let contains_c_i[c, random_i] := 1;
+		let contains_c_i[c, random_j] := 1;
+		for {q in queries} {
+			let first_improvement := costs_q_i[q, 0] - costs_q_i[q, random_i];
+			let last_improvement := costs_q_i[q, 0] - costs_q_i[q, random_j];
+			# - 1 is used in the min(...) function in order to avoid that costs_q_i[q, 0] - generated_improvement can be 0
+			let generated_improvement := round(Uniform(max(first_improvement, last_improvement), min(first_improvement + last_improvement, costs_q_i[q, 0] - 1)));
+			let costs_q_c[q, c] := costs_q_i[q, 0] - generated_improvement;
+		}
+	}
+}
